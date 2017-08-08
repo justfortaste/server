@@ -1684,9 +1684,21 @@ Item_splocal::Item_splocal(THD *thd, const LEX_CSTRING *sp_var_name,
 }
 
 
+sp_rcontext *Item_splocal::get_rcontext(THD *thd) const
+{
+  return thd->spcont;
+}
+
+
+sp_rcontext *Item_sp_package_variable::get_rcontext(THD *thd) const
+{
+  return thd->spcont->m_sp->m_parent->m_rcontext;
+}
+
+
 bool Item_splocal::fix_fields(THD *thd, Item **ref)
 {
-  Item *item= thd->spcont->get_item(m_var_idx);
+  Item *item= get_rcontext(thd)->get_item(m_var_idx);
   set_handler(item->type_handler());
   return fix_fields_from_item(thd, ref, item);
 }
@@ -1695,35 +1707,49 @@ bool Item_splocal::fix_fields(THD *thd, Item **ref)
 Item *
 Item_splocal::this_item()
 {
-  DBUG_ASSERT(m_sp == m_thd->spcont->sp);
+  DBUG_ASSERT(m_sp == m_thd->spcont->m_sp);
   DBUG_ASSERT(fixed);
-  return m_thd->spcont->get_item(m_var_idx);
+  return get_rcontext(m_thd)->get_item(m_var_idx);
 }
 
 const Item *
 Item_splocal::this_item() const
 {
-  DBUG_ASSERT(m_sp == m_thd->spcont->sp);
+  DBUG_ASSERT(m_sp == m_thd->spcont->m_sp);
   DBUG_ASSERT(fixed);
-  return m_thd->spcont->get_item(m_var_idx);
+  return get_rcontext(m_thd)->get_item(m_var_idx);
 }
 
 
 Item **
 Item_splocal::this_item_addr(THD *thd, Item **)
 {
-  DBUG_ASSERT(m_sp == thd->spcont->sp);
+  DBUG_ASSERT(m_sp == thd->spcont->m_sp);
   DBUG_ASSERT(fixed);
-  return thd->spcont->get_item_addr(m_var_idx);
+  return get_rcontext(thd)->get_item_addr(m_var_idx);
 }
 
 
-void Item_splocal::print(String *str, enum_query_type)
+void Item_splocal::print_internal(String *str, enum_query_type,
+                                  const LEX_CSTRING &prefix) const
 {
-  str->reserve(m_name.length+8);
+  str->reserve(m_name.length + 8 + prefix.length);
+  str->append(prefix);
   str->append(m_name.str, m_name.length);
   str->append('@');
   str->qs_append(m_var_idx);
+}
+
+
+void Item_splocal::print(String *str, enum_query_type type)
+{
+  print_internal(str, type, empty_clex_str);
+}
+
+
+void Item_sp_package_variable::print(String *str, enum_query_type type)
+{
+  print_internal(str, type, sp_package_body_variable_prefix_clex_str);
 }
 
 
@@ -1819,7 +1845,7 @@ bool Item_splocal_row_field::fix_fields(THD *thd, Item **ref)
 Item *
 Item_splocal_row_field::this_item()
 {
-  DBUG_ASSERT(m_sp == m_thd->spcont->sp);
+  DBUG_ASSERT(m_sp == m_thd->spcont->m_sp);
   DBUG_ASSERT(fixed);
   return m_thd->spcont->get_item(m_var_idx)->element_index(m_field_idx);
 }
@@ -1828,7 +1854,7 @@ Item_splocal_row_field::this_item()
 const Item *
 Item_splocal_row_field::this_item() const
 {
-  DBUG_ASSERT(m_sp == m_thd->spcont->sp);
+  DBUG_ASSERT(m_sp == m_thd->spcont->m_sp);
   DBUG_ASSERT(fixed);
   return m_thd->spcont->get_item(m_var_idx)->element_index(m_field_idx);
 }
@@ -1837,7 +1863,7 @@ Item_splocal_row_field::this_item() const
 Item **
 Item_splocal_row_field::this_item_addr(THD *thd, Item **)
 {
-  DBUG_ASSERT(m_sp == thd->spcont->sp);
+  DBUG_ASSERT(m_sp == thd->spcont->m_sp);
   DBUG_ASSERT(fixed);
   return thd->spcont->get_item(m_var_idx)->addr(m_field_idx);
 }
@@ -1925,7 +1951,7 @@ bool Item_case_expr::fix_fields(THD *thd, Item **ref)
 Item *
 Item_case_expr::this_item()
 {
-  DBUG_ASSERT(m_sp == m_thd->spcont->sp);
+  DBUG_ASSERT(m_sp == m_thd->spcont->m_sp);
 
   return m_thd->spcont->get_case_expr(m_case_expr_id);
 }
@@ -1935,7 +1961,7 @@ Item_case_expr::this_item()
 const Item *
 Item_case_expr::this_item() const
 {
-  DBUG_ASSERT(m_sp == m_thd->spcont->sp);
+  DBUG_ASSERT(m_sp == m_thd->spcont->m_sp);
 
   return m_thd->spcont->get_case_expr(m_case_expr_id);
 }
@@ -1944,7 +1970,7 @@ Item_case_expr::this_item() const
 Item **
 Item_case_expr::this_item_addr(THD *thd, Item **)
 {
-  DBUG_ASSERT(m_sp == thd->spcont->sp);
+  DBUG_ASSERT(m_sp == thd->spcont->m_sp);
 
   return thd->spcont->get_case_expr_addr(m_case_expr_id);
 }

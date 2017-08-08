@@ -2669,6 +2669,7 @@ class Item_func_sp :public Item_func
 private:
   Name_resolution_context *context;
   sp_name *m_name;
+  const Sp_handler *m_handler;
   mutable sp_head *m_sp;
   TABLE *dummy_table;
   uchar result_buf[64];
@@ -2679,7 +2680,7 @@ private:
 
   bool execute();
   bool execute_impl(THD *thd);
-  bool init_result_field(THD *thd);
+  bool init_result_field(THD *thd, sp_head *sp);
 
 protected:
   bool is_expensive_processor(void *arg)
@@ -2692,10 +2693,11 @@ protected:
   } 
 public:
 
-  Item_func_sp(THD *thd, Name_resolution_context *context_arg, sp_name *name);
+  Item_func_sp(THD *thd, Name_resolution_context *context_arg,
+               sp_name *name, const Sp_handler *sph);
 
   Item_func_sp(THD *thd, Name_resolution_context *context_arg,
-               sp_name *name, List<Item> &list);
+               sp_name *name, const Sp_handler *sph, List<Item> &list);
 
   virtual ~Item_func_sp()
   {}

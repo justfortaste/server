@@ -2285,6 +2285,9 @@ protected:
   Type m_type;
 
   bool append_value_for_log(THD *thd, String *str);
+
+  void print_internal(String *str, enum_query_type query_type,
+                      const LEX_CSTRING &prefix) const;
 public:
   Item_splocal(THD *thd, const LEX_CSTRING *sp_var_name, uint sp_var_idx,
                enum_field_types sp_var_type,
@@ -2326,6 +2329,7 @@ public:
   
   Item *get_copy(THD *thd, MEM_ROOT *mem_root) { return 0; }
 
+  virtual sp_rcontext *get_rcontext(THD *thd) const;
   /*
     Override the inherited create_field_for_create_select(),
     because we want to preserve the exact data type for:
@@ -2337,6 +2341,21 @@ public:
   */
   Field *create_field_for_create_select(TABLE *table)
   { return tmp_table_field_from_field_type(table); }
+};
+
+
+class Item_sp_package_variable :public Item_splocal
+{
+public:
+  Item_sp_package_variable(THD *thd,
+                           const LEX_CSTRING *sp_var_name,
+                           uint sp_var_idx,
+                           enum_field_types sp_var_type,
+                           uint pos_in_q, uint len_in_q)
+   :Item_splocal(thd, sp_var_name, sp_var_idx, sp_var_type, pos_in_q, len_in_q)
+  { }
+  sp_rcontext *get_rcontext(THD *thd) const;
+  void print(String *str, enum_query_type query_type);
 };
 
 

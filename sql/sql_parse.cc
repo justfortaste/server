@@ -559,6 +559,10 @@ void init_update_queries(void)
                                             CF_INSERTS_DATA;
   sql_command_flags[SQLCOM_CREATE_DB]=      CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS | CF_DB_CHANGE;
   sql_command_flags[SQLCOM_DROP_DB]=        CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS | CF_DB_CHANGE;
+  sql_command_flags[SQLCOM_CREATE_PACKAGE]= CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS;
+  sql_command_flags[SQLCOM_DROP_PACKAGE]=   CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS;
+  sql_command_flags[SQLCOM_CREATE_PACKAGE_BODY]= CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS;
+  sql_command_flags[SQLCOM_DROP_PACKAGE_BODY]= CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS;
   sql_command_flags[SQLCOM_ALTER_DB_UPGRADE]= CF_AUTO_COMMIT_TRANS;
   sql_command_flags[SQLCOM_ALTER_DB]=       CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS;
   sql_command_flags[SQLCOM_RENAME_TABLE]=   CF_CHANGES_DATA | CF_AUTO_COMMIT_TRANS;
@@ -632,6 +636,8 @@ void init_update_queries(void)
                                             CF_OPTIMIZER_TRACE; // (1)
 
   sql_command_flags[SQLCOM_SHOW_STATUS_PROC]= CF_STATUS_COMMAND | CF_REEXECUTION_FRAGILE;
+  sql_command_flags[SQLCOM_SHOW_STATUS_PACKAGE]= CF_STATUS_COMMAND | CF_REEXECUTION_FRAGILE;
+  sql_command_flags[SQLCOM_SHOW_STATUS_PACKAGE_BODY]= CF_STATUS_COMMAND | CF_REEXECUTION_FRAGILE;
   sql_command_flags[SQLCOM_SHOW_STATUS]=      CF_STATUS_COMMAND | CF_REEXECUTION_FRAGILE;
   sql_command_flags[SQLCOM_SHOW_DATABASES]=   CF_STATUS_COMMAND | CF_REEXECUTION_FRAGILE;
   sql_command_flags[SQLCOM_SHOW_TRIGGERS]=    CF_STATUS_COMMAND | CF_REEXECUTION_FRAGILE;
@@ -666,10 +672,13 @@ void init_update_queries(void)
   sql_command_flags[SQLCOM_SHOW_SLAVE_STAT]=  CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_CREATE_PROC]= CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_CREATE_FUNC]= CF_STATUS_COMMAND;
+  sql_command_flags[SQLCOM_SHOW_CREATE_PACKAGE]= CF_STATUS_COMMAND;
+  sql_command_flags[SQLCOM_SHOW_CREATE_PACKAGE_BODY]= CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_CREATE_TRIGGER]=  CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_STATUS_FUNC]= CF_STATUS_COMMAND | CF_REEXECUTION_FRAGILE;
   sql_command_flags[SQLCOM_SHOW_PROC_CODE]=   CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_FUNC_CODE]=   CF_STATUS_COMMAND;
+  sql_command_flags[SQLCOM_SHOW_PACKAGE_BODY_CODE]= CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_CREATE_EVENT]= CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_PROFILES]=    CF_STATUS_COMMAND;
   sql_command_flags[SQLCOM_SHOW_PROFILE]=     CF_STATUS_COMMAND;
@@ -830,6 +839,10 @@ void init_update_queries(void)
   sql_command_flags[SQLCOM_DROP_INDEX]|=       CF_DISALLOW_IN_RO_TRANS;
   sql_command_flags[SQLCOM_CREATE_DB]|=        CF_DISALLOW_IN_RO_TRANS;
   sql_command_flags[SQLCOM_DROP_DB]|=          CF_DISALLOW_IN_RO_TRANS;
+  sql_command_flags[SQLCOM_CREATE_PACKAGE]|=   CF_DISALLOW_IN_RO_TRANS;
+  sql_command_flags[SQLCOM_DROP_PACKAGE]|=     CF_DISALLOW_IN_RO_TRANS;
+  sql_command_flags[SQLCOM_CREATE_PACKAGE_BODY]|= CF_DISALLOW_IN_RO_TRANS;
+  sql_command_flags[SQLCOM_DROP_PACKAGE_BODY]|= CF_DISALLOW_IN_RO_TRANS;
   sql_command_flags[SQLCOM_ALTER_DB_UPGRADE]|= CF_DISALLOW_IN_RO_TRANS;
   sql_command_flags[SQLCOM_ALTER_DB]|=         CF_DISALLOW_IN_RO_TRANS;
   sql_command_flags[SQLCOM_CREATE_VIEW]|=      CF_DISALLOW_IN_RO_TRANS;
@@ -3074,6 +3087,72 @@ static bool prepare_db_action(THD *thd, ulong want_access, LEX_CSTRING *dbname)
   return check_access(thd, want_access, dbname->str, NULL, NULL, 1, 0);
 }
 
+
+bool Sql_cmd_call::execute(THD *thd)
+
+{
+  TABLE_LIST *all_tables= thd->lex->query_tables;
+  sp_head *sp;
+  /*
+    This will cache all SP and SF and open and lock all tables
+    required for execution.
+  */
+  if (check_table_access(thd, SELECT_ACL, all_tables, FALSE,
+                         UINT_MAX, FALSE) ||
+      open_and_lock_tables(thd, all_tables, TRUE, 0))
+   return true;
+
+  /*
+    By this moment all needed SPs should be in cache so no need to look
+    into DB.
+  */
+  if (!(sp= m_handler->sp_find_routine(thd, m_name, true)))
+  {
+    /*
+      If the routine is not found, let's still check EXECUTE_ACL to decide
+      whether to return "Access denied" or "Routine does not exist".
+    */
+    if (check_routine_access(thd, EXECUTE_ACL, m_name->m_db.str,
+                             m_name->m_name.str,
+                             &sp_handler_procedure,
+                             false))
+      return true;
+    /*
+      sp_find_routine can have issued an ER_SP_RECURSION_LIMIT error.
+      Send message ER_SP_DOES_NOT_EXIST only if procedure is not found in
+      cache.
+    */
+    if (!sp_cache_lookup(&thd->sp_proc_cache, m_name))
+      my_error(ER_SP_DOES_NOT_EXIST, MYF(0), "PROCEDURE",
+               ErrConvDQName(m_name).ptr());
+    return true;
+  }
+  else
+  {
+    if (sp->check_execute_access(thd))
+      return true;
+    /*
+      Check that the stored procedure doesn't contain Dynamic SQL
+      and doesn't return result sets: such stored procedures can't
+      be called from a function or trigger.
+    */
+    if (thd->in_sub_stmt)
+    {
+      const char *where= (thd->in_sub_stmt & SUB_STMT_TRIGGER ?
+                          "trigger" : "function");
+      if (sp->is_not_allowed_in_function(where))
+        return true;
+    }
+
+    if (do_execute_sp(thd, sp))
+      return true;
+  }
+  return false;
+}
+
+
+
+
 /**
   Execute command saved in thd and lex->sql_command.
 
@@ -3588,6 +3667,8 @@ mysql_execute_command(THD *thd)
     /* fall through */
   case SQLCOM_SHOW_STATUS_PROC:
   case SQLCOM_SHOW_STATUS_FUNC:
+  case SQLCOM_SHOW_STATUS_PACKAGE:
+  case SQLCOM_SHOW_STATUS_PACKAGE_BODY:
   case SQLCOM_SHOW_DATABASES:
   case SQLCOM_SHOW_TABLES:
   case SQLCOM_SHOW_TRIGGERS:
@@ -5343,11 +5424,10 @@ end_with_restore_list:
     }
     if (first_table)
     {
-      if (lex->type == TYPE_ENUM_PROCEDURE ||
-          lex->type == TYPE_ENUM_FUNCTION)
+      const Sp_handler *sph= Sp_handler::handler((stored_procedure_type)
+                                                 lex->type);
+      if (sph)
       {
-        const Sp_handler *sph= Sp_handler::handler((stored_procedure_type)
-                                                   lex->type);
         uint grants= lex->all_privileges 
 		   ? (PROC_ACLS & ~GRANT_ACL) | (lex->grant & GRANT_ACL)
 		   : lex->grant;
@@ -5742,66 +5822,14 @@ end_with_restore_list:
     break;
   case SQLCOM_CREATE_PROCEDURE:
   case SQLCOM_CREATE_SPFUNCTION:
+  case SQLCOM_CREATE_PACKAGE:
+  case SQLCOM_CREATE_PACKAGE_BODY:
   {
     if (mysql_create_routine(thd, lex))
       goto error;
     my_ok(thd);
     break; /* break super switch */
   } /* end case group bracket */
-  case SQLCOM_CALL:
-    {
-      sp_head *sp;
-      /*
-        This will cache all SP and SF and open and lock all tables
-        required for execution.
-      */
-      if (check_table_access(thd, SELECT_ACL, all_tables, FALSE,
-                             UINT_MAX, FALSE) ||
-          open_and_lock_tables(thd, all_tables, TRUE, 0))
-       goto error;
-
-      if (check_routine_access(thd, EXECUTE_ACL, lex->spname->m_db.str,
-                               lex->spname->m_name.str, &sp_handler_procedure,
-                               false))
-        goto error;
-
-      /*
-        By this moment all needed SPs should be in cache so no need to look 
-        into DB. 
-      */
-      if (!(sp= sp_handler_procedure.sp_find_routine(thd, lex->spname, true)))
-      {
-        /*
-          sp_find_routine can have issued an ER_SP_RECURSION_LIMIT error.
-          Send message ER_SP_DOES_NOT_EXIST only if procedure is not found in
-          cache.
-        */
-        if (!sp_cache_lookup(&thd->sp_proc_cache, lex->spname))
-          my_error(ER_SP_DOES_NOT_EXIST, MYF(0), "PROCEDURE",
-                   ErrConvDQName(lex->spname).ptr());
-        goto error;
-      }
-      else
-      {
-        /*
-          Check that the stored procedure doesn't contain Dynamic SQL
-          and doesn't return result sets: such stored procedures can't
-          be called from a function or trigger.
-        */
-        if (thd->in_sub_stmt)
-        {
-          const char *where= (thd->in_sub_stmt & SUB_STMT_TRIGGER ?
-                              "trigger" : "function");
-          if (sp->is_not_allowed_in_function(where))
-            goto error;
-        }
-
-        if (do_execute_sp(thd, sp))
-          goto error;
-      }
-      break;
-    }
-
   case SQLCOM_COMPOUND:
     DBUG_ASSERT(all_tables == 0);
     DBUG_ASSERT(thd->in_sub_stmt == 0);
@@ -5845,6 +5873,8 @@ end_with_restore_list:
     }
   case SQLCOM_DROP_PROCEDURE:
   case SQLCOM_DROP_FUNCTION:
+  case SQLCOM_DROP_PACKAGE:
+  case SQLCOM_DROP_PACKAGE_BODY:
     {
 #ifdef HAVE_DLOPEN
       if (lex->sql_command == SQLCOM_DROP_FUNCTION &&
@@ -5961,6 +5991,8 @@ end_with_restore_list:
     }
   case SQLCOM_SHOW_CREATE_PROC:
   case SQLCOM_SHOW_CREATE_FUNC:
+  case SQLCOM_SHOW_CREATE_PACKAGE:
+  case SQLCOM_SHOW_CREATE_PACKAGE_BODY:
     {
       const Sp_handler *sph= Sp_handler::handler(lex->sql_command);
 #ifdef WITH_WSREP
@@ -5972,13 +6004,18 @@ end_with_restore_list:
     }
   case SQLCOM_SHOW_PROC_CODE:
   case SQLCOM_SHOW_FUNC_CODE:
+  case SQLCOM_SHOW_PACKAGE_BODY_CODE:
     {
 #ifndef DBUG_OFF
+      Database_qualified_name pkgname(&null_clex_str, &null_clex_str);
       sp_head *sp;
       const Sp_handler *sph= Sp_handler::handler(lex->sql_command);
 #ifdef WITH_WSREP
       if (WSREP_CLIENT(thd) && wsrep_sync_wait(thd)) goto error;
 #endif /* WITH_WSREP */
+      if (sph->sp_resolve_package_routine(thd, thd->lex->sphead,
+                                          lex->spname, &sph, &pkgname))
+        return true;
       if (sph->sp_cache_routine(thd, lex->spname, false, &sp))
         goto error;
       if (!sp || sp->show_routine_code(thd))
@@ -6196,6 +6233,7 @@ end_with_restore_list:
   case SQLCOM_SIGNAL:
   case SQLCOM_RESIGNAL:
   case SQLCOM_GET_DIAGNOSTICS:
+  case SQLCOM_CALL:
     DBUG_ASSERT(lex->m_sql_cmd != NULL);
     res= lex->m_sql_cmd->execute(thd);
     break;
@@ -7903,6 +7941,8 @@ void mysql_parse(THD *thd, char *rawbuf, uint length,
     THD_STAGE_INFO(thd, stage_freeing_items);
     sp_cache_enforce_limit(thd->sp_proc_cache, stored_program_cache_size);
     sp_cache_enforce_limit(thd->sp_func_cache, stored_program_cache_size);
+    sp_cache_enforce_limit(thd->sp_package_spec_cache, stored_program_cache_size);
+    sp_cache_enforce_limit(thd->sp_package_body_cache, stored_program_cache_size);
     thd->end_statement();
     thd->cleanup_after_query();
     DBUG_ASSERT(thd->change_list.is_empty());
