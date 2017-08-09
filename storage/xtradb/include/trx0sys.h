@@ -1,6 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -571,7 +572,11 @@ this contains the same fields as TRX_SYS_MYSQL_LOG_INFO below */
 
 #ifdef WITH_WSREP
 /* The offset to WSREP XID headers */
-#define TRX_SYS_WSREP_XID_INFO (UNIV_PAGE_SIZE - 3500)
+/* In 4K page size rseg slots (max 126) use at least 126*8 bytes.
+Therefore WSREP XID must be on different byte offset. */
+#define TRX_SYS_WSREP_XID_INFO (UNIV_PAGE_SIZE > 4096 ? UNIV_PAGE_SIZE - 3500 : UNIV_PAGE_SIZE - 2500)
+#define TRX_SYS_WSREP_XID_INFO_OLD (UNIV_PAGE_SIZE - 3500)
+
 #define TRX_SYS_WSREP_XID_MAGIC_N_FLD 0
 #define TRX_SYS_WSREP_XID_MAGIC_N 0x77737265
 
