@@ -35,7 +35,7 @@ INSTALL(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/limits
   DESTINATION  ${prefix}sql-bench COMPONENT SqlBench)
 
 SET(all_files README bench-count-distinct.sh bench-init.pl.sh
-  cmake_install.cmake compare-results.sh copy-db.sh crash-me.sh example.bat
+  compare-results.sh copy-db.sh crash-me.sh example.bat
   graph-compare-results.sh innotest1.sh innotest1a.sh innotest1b.sh
   innotest2.sh innotest2a.sh innotest2b.sh myisam.cnf pwd.bat
   run-all-tests.sh server-cfg.sh test-ATIS.sh test-alter-table.sh
