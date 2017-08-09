@@ -2683,7 +2683,9 @@ static void network_init(void)
   if (MYSQL_CALLBACK_ELSE(thread_scheduler, init, (), 0))
     unireg_abort(1);			/* purecov: inspected */
 
-  set_proxy_protocol_networks(my_proxy_protocol_networks);
+  if (set_proxy_protocol_networks(my_proxy_protocol_networks))
+    unireg_abort(1);
+
   set_ports();
 
   if (report_port == 0)

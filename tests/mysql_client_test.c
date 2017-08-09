@@ -19678,6 +19678,9 @@ static void test_proxy_header_tcp(const char *ipaddr, int port)
   size_t header_lengths[2];
   int i;
 
+  // normalize IPv4-mapped IPv6 addresses, e.g ::ffff:192.168.0.1 to 192.168.0.1
+  char *normalized_addr= strncmp(ipaddr, "::ffff:", 7)?ipaddr : ipaddr + 7;
+
   memset(&v2_header, 0, sizeof(v2_header));
   sprintf(text_header,"PROXY %s %s %s %d 3306\r\n",family == AF_INET?"TCP4":"TCP6", ipaddr, ipaddr, port);
  
@@ -19704,7 +19707,7 @@ static void test_proxy_header_tcp(const char *ipaddr, int port)
     memcpy(v2_header.addr.ip6.dst_addr,addr_bin, sizeof (v2_header.addr.ip6.dst_addr));
   }
 
-  sprintf(query,"CREATE USER 'u'@'%s' IDENTIFIED BY 'password'",ipaddr);
+  sprintf(query,"CREATE USER 'u'@'%s' IDENTIFIED BY 'password'",normalized_addr);
   rc= mysql_query(mysql, query);
   myquery(rc);
 
@@ -19732,12 +19735,12 @@ static void test_proxy_header_tcp(const char *ipaddr, int port)
     result= mysql_store_result(m);
     mytest(result);
     row = mysql_fetch_row(result);
-    addrlen = strlen(ipaddr);
-    DIE_UNLESS(strncmp(row[0], ipaddr, addrlen) == 0);
+    addrlen = strlen(normalized_addr);
+    DIE_UNLESS(strncmp(row[0], normalized_addr, addrlen) == 0);
     DIE_UNLESS(atoi(row[0] + addrlen+1) == port);
     mysql_close(m);
   }
-  sprintf(query,"DROP USER 'u'@'%s'",ipaddr);
+  sprintf(query,"DROP USER 'u'@'%s'",normalized_addr);
   rc = mysql_query(mysql, query);
   myquery(rc);
 }
@@ -19803,6 +19806,7 @@ static void test_proxy_header()
 {
   test_proxy_header_tcp("192.168.0.1",3333);
   test_proxy_header_tcp("2001:db8:85a3::8a2e:370:7334",2222);
+  test_proxy_header_tcp("::ffff:192.168.0.1",2222);
   test_proxy_header_localhost();
   test_proxy_header_ignore();
 }

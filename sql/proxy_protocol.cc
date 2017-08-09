@@ -77,6 +77,7 @@ static int parse_v1_header(uchar *hdr, size_t len, proxy_peer_info *peer_info)
   if (!inet_pton(address_family, token, addr))
     return -1;
 
+
   // Parse server IP address
   token= strtok_r(NULL, " ", &ctx);
   if (!token)
@@ -219,6 +220,20 @@ int parse_proxy_protocol_header(NET *net, proxy_peer_info *peer_info)
     if (parse_v2_header(hdr, pos, peer_info))
       return -1;
   }
+
+  if (peer_info->peer_addr.ss_family == AF_INET6)
+  {
+    /*
+      Normalize IPv4 compatible or mapped IPv6 addresses.
+      They will be treated as IPv4.
+    */
+    sockaddr_storage tmp;
+    int dst_len;
+    memset(&tmp, 0, sizeof(tmp));
+    vio_get_normalized_ip((const struct sockaddr *)&peer_info->peer_addr,
+      sizeof(sockaddr_storage), (struct sockaddr *)&tmp, &dst_len);
+    memcpy(&peer_info->peer_addr, &tmp, (size_t)dst_len);
+  }
   return 0;
 }
 
@@ -243,6 +258,27 @@ size_t  proxy_protocol_subnet_count;
 
 #define MAX_MASK_BITS(family) (family == AF_INET ? 32 : 128)
 
+
+/** Convert IPv4 that are compat or mapped IPv4 to "normal" IPv4 */
+static int normalize_subnet(struct subnet *subnet)
+{
+  unsigned char *addr= (unsigned char*)subnet->addr;
+  if (subnet->family == AF_INET6)
+  {
+    const struct in6_addr *src_ip6=(in6_addr *)addr;
+    if (IN6_IS_ADDR_V4MAPPED(src_ip6) || IN6_IS_ADDR_V4COMPAT(src_ip6))
+    {
+      /* Copy the actual IPv4 address (4 last bytes) */
+      if (subnet->bits < 96)
+        return -1;
+      subnet->family= AF_INET;
+      memcpy(addr, addr+12, 4);
+      subnet->bits -= 96;
+    }
+  }
+  return 0;
+}
+
 /**
   Convert string representation of a subnet to subnet struct.
 */
@@ -260,6 +296,7 @@ static int parse_subnet(char *addr_str, struct subnet *subnet)
     *pmask= 0;
     pmask++;
     int b= 0;
+
     do
     {
       if (*pmask < '0' || *pmask > '9')
@@ -268,13 +305,18 @@ static int parse_subnet(char *addr_str, struct subnet *subnet)
       if (b > MAX_MASK_BITS(subnet->family))
         return -1;
       pmask++;
-    } while (*pmask);
+    }
+    while (*pmask);
+
     subnet->bits= (unsigned short)b;
   }
+
   if (!inet_pton(subnet->family, addr_str, subnet->addr))
-  {
     return -1;
-  }
+
+  if (normalize_subnet(subnet))
+    return -1;
+
   return 0;
 }
 
@@ -323,7 +365,10 @@ int set_proxy_protocol_networks(const char *subnets_str)
       return -1;
 
     if (parse_subnet(token, &proxy_protocol_subnets[proxy_protocol_subnet_count]))
+    {
+      sql_print_error("Error parsing proxy_protocol_networks parameter, near '%s'",token);
       return -1;
+    }
   }
   return 0;
 }
