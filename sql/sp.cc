@@ -1926,6 +1926,7 @@ Sp_handler::sp_clone_and_link_routine(THD *thd,
                                       sp_head *sp) const
 {
   DBUG_ENTER("sp_link_routine");
+  int rc;
   ulong level;
   sp_head *new_sp;
   LEX_CSTRING returns= empty_clex_str;
@@ -2005,15 +2006,21 @@ Sp_handler::sp_clone_and_link_routine(THD *thd,
     DBUG_ASSERT(lname.m_name.str[sp->m_parent->m_name.length] == '.');
     lname.m_name.str+= prefix_length;
     lname.m_name.length-= prefix_length;
+    sp->m_parent->m_is_cloning_routine= true;
   }
 
-  if (db_load_routine(thd, &lname, &new_sp,
+
+  rc= db_load_routine(thd, &lname, &new_sp,
                       sp->m_sql_mode, sp->m_params, returns,
                       sp->m_body, sp->chistics(),
                       sp->m_definer,
                       sp->m_created, sp->m_modified,
                       sp->m_parent,
-                      sp->get_creation_ctx()) == SP_OK)
+                      sp->get_creation_ctx());
+  if (sp->m_parent)
+    sp->m_parent->m_is_cloning_routine= false;
+
+  if (rc == SP_OK)
   {
 #ifndef DBUG_OFF
     /*
@@ -2415,8 +2422,7 @@ Sp_handler::sp_resolve_package_routine(THD *thd,
       - yyy() is earlier implemented in the current CREATE PACKAGE BODY
       - yyy() is declared in the corresponding CREATE PACKAGE
     */
-    if ((tmpname.length == name->m_name.length &&
-         !strcmp(tmpname.str, name->m_name.str)) ||
+    if (eq_routine_name(tmpname, name->m_name) ||
         caller->m_parent->m_routine_implementations.find(name->m_name, type()) ||
         is_package_public_routine_quick(thd, caller->m_db,
                                         pkgstr, name->m_name, type()))

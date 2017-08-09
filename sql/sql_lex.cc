@@ -5883,10 +5883,10 @@ sp_name *LEX::make_sp_name(THD *thd, const LEX_CSTRING *name1,
 }
 
 
-sp_head *LEX::make_sp_head(THD *thd, sp_package *package,
-                           const sp_name *name,
+sp_head *LEX::make_sp_head(THD *thd, const sp_name *name,
                            const Sp_handler *sph)
 {
+  sp_package *package= thd->lex->get_sp_package();
   sp_head *sp;
 
   /* Order is important here: new - reset - init */
@@ -5910,16 +5910,58 @@ sp_head *LEX::make_sp_head(THD *thd, sp_package *package,
 }
 
 
-sp_head *LEX::make_sp_head_no_recursive(THD *thd, sp_package *package,
-                                        const sp_name *name,
+sp_head *LEX::make_sp_head_no_recursive(THD *thd, const sp_name *name,
                                         const Sp_handler *sph)
 {
+  sp_package *package= thd->lex->get_sp_package();
+  /*
+    Sp_handler::sp_clone_and_link_routine() generates a standalone-alike
+    statement to clone package routines for recursion, e.g.:
+      CREATE PROCEDURE p1 AS BEGIN NULL; END;
+    Translate a standalone routine handler to the corresponding
+    package routine handler if we're cloning a package routine, e.g.:
+      sp_handler_procedure -> sp_handler_package_procedure
+      sp_handler_function  -> sp_handler_package_function
+  */
+  if (package && package->m_is_cloning_routine)
+    sph= sph->package_routine_handler();
   if (!sphead ||
-      sphead->m_handler->type() == TYPE_ENUM_PACKAGE_BODY ||
-      sphead->m_handler->type() == TYPE_ENUM_PACKAGE)
-    return make_sp_head(thd, package, name, sph);
+      (package &&
+       (sph == &sp_handler_package_procedure ||
+        sph == &sp_handler_package_function)))
+    return make_sp_head(thd, name, sph);
   my_error(ER_SP_NO_RECURSIVE_CREATE, MYF(0), sph->type_str());
   return NULL;
+}
+
+
+bool LEX::sp_body_finalize_procedure(THD *thd)
+{
+  if (sphead->check_unresolved_goto())
+    return true;
+  sphead->set_stmt_end(thd);
+  sql_command= SQLCOM_CREATE_PROCEDURE;
+  sphead->restore_thd_mem_root(thd);
+  return false;
+}
+
+
+bool LEX::sp_body_finalize_function(THD *thd)
+{
+  if (sphead->check_unresolved_goto())
+    return true;
+  if (sphead->is_not_allowed_in_function("function"))
+    return true;
+  sql_command= SQLCOM_CREATE_SPFUNCTION;
+  sphead->set_stmt_end(thd);
+  if (!(sphead->m_flags & sp_head::HAS_RETURN))
+  {
+    my_error(ER_SP_NORETURN, MYF(0), ErrConvDQName(sphead).ptr());
+    return true;
+  }
+  (void) is_native_function_with_warn(thd, &sphead->m_name);
+  sphead->restore_thd_mem_root(thd);
+  return false;
 }
 
 
@@ -6214,7 +6256,7 @@ bool LEX::maybe_start_compound_statement(THD *thd)
 {
   if (!sphead)
   {
-    if (!make_sp_head(thd, NULL, NULL, &sp_handler_procedure))
+    if (!make_sp_head(thd, NULL, &sp_handler_procedure))
       return true;
     sphead->set_suid(SP_IS_NOT_SUID);
     sphead->set_body_start(thd, thd->m_parser_state->m_lip.get_cpp_ptr());
@@ -7332,7 +7374,7 @@ bool LEX::create_package_finalize(THD *thd,
   if (name2 &&
       (name2->m_explicit_name != name->m_explicit_name ||
        strcmp(name2->m_db.str, name->m_db.str) ||
-       strcmp(name2->m_name.str, name->m_name.str)))
+       !Sp_handler::eq_routine_name(name2->m_name, name->m_name)))
   {
     bool exp= name2->m_explicit_name || name->m_explicit_name;
     my_error(ER_END_IDENTIFIER_DOES_NOT_MATCH, MYF(0),

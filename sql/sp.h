@@ -108,6 +108,13 @@ public:
   static const Sp_handler *handler(enum enum_sql_command cmd);
   static const Sp_handler *handler(stored_procedure_type type);
   static const Sp_handler *handler(MDL_key::enum_mdl_namespace ns);
+  static bool eq_routine_name(const LEX_CSTRING &name1,
+                              const LEX_CSTRING &name2)
+  {
+    return my_strnncoll(system_charset_info,
+                        (const uchar *) name1.str, name1.length,
+                        (const uchar *) name2.str, name2.length) == 0;
+  }
   const char *type_str() const { return type_lex_cstring().str; }
   virtual const char *show_create_routine_col1_caption() const
   {
@@ -121,8 +128,7 @@ public:
   }
   virtual const Sp_handler *package_routine_handler() const
   {
-    DBUG_ASSERT(0);
-    return NULL;
+    return this;
   }
   virtual stored_procedure_type type() const= 0;
   virtual LEX_CSTRING type_lex_cstring() const= 0;

@@ -2948,9 +2948,8 @@ ev_sql_stmt:
             if (lex->sphead)
               my_yyabort_error((ER_EVENT_RECURSION_FORBIDDEN, MYF(0)));
               
-            if (!lex->make_sp_head(thd, NULL,
-                                   lex->event_parse_data->identifier,
-                                   &sp_handler_procedure))
+            if (!lex->make_sp_head(thd, lex->event_parse_data->identifier,
+                                        &sp_handler_procedure))
               MYSQL_YYABORT;
 
             lex->sphead->set_body_start(thd, lip->get_cpp_ptr());
@@ -16579,7 +16578,7 @@ trigger_tail:
             (*static_cast<st_trg_execution_order*>(&lex->trg_chistics))= ($17);
             lex->trg_chistics.ordering_clause_end= lip->get_cpp_ptr();
 
-            if (!lex->make_sp_head(thd, NULL, $4, &sp_handler_trigger))
+            if (!lex->make_sp_head(thd, $4, &sp_handler_trigger))
               MYSQL_YYABORT;
 
             lex->sphead->set_body_start(thd, lip->get_cpp_tok_start());
@@ -16652,7 +16651,7 @@ sf_tail:
           opt_if_not_exists
           sp_name
           {
-            if (!Lex->make_sp_head_no_recursive(thd, NULL, $1, $2,
+            if (!Lex->make_sp_head_no_recursive(thd, $1, $2,
                                                 &sp_handler_function))
               MYSQL_YYABORT;
           }
@@ -16668,26 +16667,15 @@ sf_tail:
           }
           sp_proc_stmt_in_returns_clause
           {
-            LEX *lex= thd->lex;
-            sp_head *sp= lex->sphead;
-
-            if (sp->is_not_allowed_in_function("function"))
+            if (Lex->sp_body_finalize_function(thd))
               MYSQL_YYABORT;
-
-            lex->sql_command= SQLCOM_CREATE_SPFUNCTION;
-            sp->set_stmt_end(thd);
-            if (!(sp->m_flags & sp_head::HAS_RETURN))
-              my_yyabort_error((ER_SP_NORETURN, MYF(0),
-                                ErrConvDQName(sp).ptr()));
-            (void) is_native_function_with_warn(thd, &sp->m_name);
-            sp->restore_thd_mem_root(thd);
           }
         ;
 
 sp_tail:
           opt_if_not_exists sp_name
           {
-            if (!Lex->make_sp_head_no_recursive(thd, NULL, $1, $2,
+            if (!Lex->make_sp_head_no_recursive(thd, $1, $2,
                                                 &sp_handler_procedure))
               MYSQL_YYABORT;
           }
@@ -16699,12 +16687,8 @@ sp_tail:
           }
           sp_proc_stmt
           {
-            LEX *lex= Lex;
-            sp_head *sp= lex->sphead;
-
-            sp->set_stmt_end(thd);
-            lex->sql_command= SQLCOM_CREATE_PROCEDURE;
-            sp->restore_thd_mem_root(thd);
+            if (Lex->sp_body_finalize_procedure(thd))
+              MYSQL_YYABORT;
           }
         ;
 

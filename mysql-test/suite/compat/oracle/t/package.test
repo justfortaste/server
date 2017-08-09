@@ -189,6 +189,26 @@ DROP PACKAGE test2;
 
 
 --echo #
+--echo # Syntax error inside a CREATE PACKAGE BODY executable section
+--echo #
+
+DELIMITER $$;
+CREATE PACKAGE test2 AS
+  FUNCTION f1 RETURN INT;
+END;
+$$
+--error ER_PARSE_ERROR
+CREATE PACKAGE BODY test2 AS
+  FUNCTION f1 RETURN INT AS BEGIN RETURN 10; END;
+BEGIN
+  SOME SYNTAX ERROR;
+END
+$$
+DELIMITER ;$$
+DROP PACKAGE test2;
+
+
+--echo #
 --echo # CREATE PROCEDURE inside a package PROCEDURE is not allowed
 --echo #
 
@@ -224,6 +244,46 @@ CREATE PACKAGE BODY test2 AS
   BEGIN
     CREATE PACKAGE p1 AS PROCEDURE p1; END;
   END;
+END;
+$$
+DELIMITER ;$$
+DROP PACKAGE test2;
+
+
+--echo #
+--echo # CREATE PROCEDURE inside a package executable section is not allowed
+--echo #
+
+DELIMITER $$;
+CREATE PACKAGE test2 AS
+  PROCEDURE p1;
+END;
+$$
+--error ER_SP_NO_RECURSIVE_CREATE
+CREATE PACKAGE BODY test2 AS
+  PROCEDURE p1 AS BEGIN NULL; END;
+BEGIN
+  CREATE PROCEDURE p1 AS BEGIN NULL; END;
+END;
+$$
+DELIMITER ;$$
+DROP PACKAGE test2;
+
+
+--echo #
+--echo # CREATE FUNCTION inside a package executable section is not allowed
+--echo #
+
+DELIMITER $$;
+CREATE PACKAGE test2 AS
+  PROCEDURE p1;
+END;
+$$
+--error ER_SP_NO_RECURSIVE_CREATE
+CREATE PACKAGE BODY test2 AS
+  PROCEDURE p1 AS BEGIN NULL; END;
+BEGIN
+  CREATE FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
 END;
 $$
 DELIMITER ;$$
@@ -347,6 +407,103 @@ CALL test2.p1();
 --error ER_SP_PROC_TABLE_CORRUPT
 CALL test2.p1();
 
+DROP PACKAGE test2;
+
+
+--echo #
+--echo # Duplicate PROCEDURE in CREATE PACKAGE
+--echo #
+
+DELIMITER $$;
+--error ER_SP_ALREADY_EXISTS,
+CREATE PACKAGE test2 AS
+  PROCEDURE p1;
+  PROCEDURE p1;
+END;
+$$
+DELIMITER ;$$
+
+
+DELIMITER $$;
+--error ER_SP_ALREADY_EXISTS,
+CREATE PACKAGE test2 AS
+  PROCEDURE p1;
+  PROCEDURE P1;
+END;
+$$
+DELIMITER ;$$
+
+
+--echo #
+--echo # Duplicate FUNCTION in CREATE PACKAGE
+--echo #
+
+DELIMITER $$;
+--error ER_SP_ALREADY_EXISTS,
+CREATE PACKAGE test2 AS
+  FUNCTION f1 RETURN INT;
+  FUNCTION f1 RETURN INT;
+END;
+$$
+DELIMITER ;$$
+
+DELIMITER $$;
+--error ER_SP_ALREADY_EXISTS,
+CREATE PACKAGE test2 AS
+  FUNCTION f1 RETURN INT;
+  FUNCTION F1 RETURN INT;
+END;
+$$
+DELIMITER ;$$
+
+
+--echo #
+--echo # Duplicate PROCEDURE in CREATE PACKAGE BODY
+--echo #
+
+DELIMITER $$;
+CREATE PACKAGE test2 AS
+  PROCEDURE p1;
+END;
+$$
+--error ER_SP_ALREADY_EXISTS
+CREATE PACKAGE BODY test2 AS
+  PROCEDURE p1 AS BEGIN NULL; END;
+  PROCEDURE p1 AS BEGIN NULL; END;
+END;
+$$
+--error ER_SP_ALREADY_EXISTS
+CREATE PACKAGE BODY test2 AS
+  PROCEDURE p1 AS BEGIN NULL; END;
+  PROCEDURE P1 AS BEGIN NULL; END;
+END;
+$$
+DELIMITER ;$$
+DROP PACKAGE test2;
+
+
+--echo #
+--echo # Duplicate FUNCTION in CREATE PACKAGE BODY
+--echo #
+
+DELIMITER $$;
+CREATE PACKAGE test2 AS
+  FUNCTION f1 RETURN INT;
+END;
+$$
+--error ER_SP_ALREADY_EXISTS
+CREATE PACKAGE BODY test2 AS
+  FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
+  FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
+END;
+$$
+--error ER_SP_ALREADY_EXISTS
+CREATE PACKAGE BODY test2 AS
+  FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
+  FUNCTION F1 RETURN INT AS BEGIN RETURN 0; END;
+END;
+$$
+DELIMITER ;$$
 DROP PACKAGE test2;
 
 
@@ -670,7 +827,7 @@ DROP TABLE t1;
 
 
 --echo #
---echo # CREATA PACKAGE: Optional package name after the "END" keyword
+--echo # CREATE PACKAGE: Optional package name after the "END" keyword
 --echo #
 
 DELIMITER $$;
@@ -778,6 +935,37 @@ $$
 DELIMITER ;$$
 DROP PACKAGE test2;
 
+--echo #
+--echo # Package and package routine name and end name are case insensitive
+--echo #
+
+DELIMITER $$;
+CREATE PACKAGE test2 AS
+  FUNCTION f1 RETURN TEXT;
+  PROCEDURE p1;
+END TEST2;
+$$
+DELIMITER ;$$
+
+DELIMITER $$;
+CREATE PACKAGE BODY test2 AS
+  FUNCTION f1 RETURN TEXT AS
+  BEGIN
+    RETURN 'This is f1';
+  END F1;
+  PROCEDURE P1 AS
+  BEGIN
+    SELECT 'This is p1' AS msg;
+  END p1;
+END TEST2;
+$$
+DELIMITER ;$$
+SELECT TEST2.F1();
+SELECT test2.f1();
+CALL TEST2.p1();
+CALL test2.P1();
+DROP PACKAGE BODY TEST2;
+DROP PACKAGE TEST2;
 
 
 --echo #

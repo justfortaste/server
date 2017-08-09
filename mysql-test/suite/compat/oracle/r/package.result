@@ -141,6 +141,22 @@ FUNCTION f2 RETURN INT AS BEGIN RETURN 10; END;
 END' at line 3
 DROP PACKAGE test2;
 #
+# Syntax error inside a CREATE PACKAGE BODY executable section
+#
+CREATE PACKAGE test2 AS
+FUNCTION f1 RETURN INT;
+END;
+$$
+CREATE PACKAGE BODY test2 AS
+FUNCTION f1 RETURN INT AS BEGIN RETURN 10; END;
+BEGIN
+SOME SYNTAX ERROR;
+END
+$$
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'SYNTAX ERROR;
+END' at line 4
+DROP PACKAGE test2;
+#
 # CREATE PROCEDURE inside a package PROCEDURE is not allowed
 #
 CREATE PACKAGE test2 AS
@@ -171,6 +187,36 @@ END;
 END;
 $$
 ERROR 2F003: Can't create a PACKAGE from within another stored routine
+DROP PACKAGE test2;
+#
+# CREATE PROCEDURE inside a package executable section is not allowed
+#
+CREATE PACKAGE test2 AS
+PROCEDURE p1;
+END;
+$$
+CREATE PACKAGE BODY test2 AS
+PROCEDURE p1 AS BEGIN NULL; END;
+BEGIN
+CREATE PROCEDURE p1 AS BEGIN NULL; END;
+END;
+$$
+ERROR 2F003: Can't create a PROCEDURE from within another stored routine
+DROP PACKAGE test2;
+#
+# CREATE FUNCTION inside a package executable section is not allowed
+#
+CREATE PACKAGE test2 AS
+PROCEDURE p1;
+END;
+$$
+CREATE PACKAGE BODY test2 AS
+PROCEDURE p1 AS BEGIN NULL; END;
+BEGIN
+CREATE FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
+END;
+$$
+ERROR 2F003: Can't create a FUNCTION from within another stored routine
 DROP PACKAGE test2;
 #
 # CREATE PACKAGE inside a package executable section is not allowed
@@ -256,6 +302,76 @@ CALL test2.p1();
 ERROR HY000: Failed to load routine test.test2. The table mysql.proc is missing, corrupt, or contains bad data (internal code -6)
 CALL test2.p1();
 ERROR HY000: Failed to load routine test.test2. The table mysql.proc is missing, corrupt, or contains bad data (internal code -6)
+DROP PACKAGE test2;
+#
+# Duplicate PROCEDURE in CREATE PACKAGE
+#
+CREATE PACKAGE test2 AS
+PROCEDURE p1;
+PROCEDURE p1;
+END;
+$$
+ERROR 42000: PROCEDURE p1 already exists
+CREATE PACKAGE test2 AS
+PROCEDURE p1;
+PROCEDURE P1;
+END;
+$$
+ERROR 42000: PROCEDURE P1 already exists
+#
+# Duplicate FUNCTION in CREATE PACKAGE
+#
+CREATE PACKAGE test2 AS
+FUNCTION f1 RETURN INT;
+FUNCTION f1 RETURN INT;
+END;
+$$
+ERROR 42000: FUNCTION f1 already exists
+CREATE PACKAGE test2 AS
+FUNCTION f1 RETURN INT;
+FUNCTION F1 RETURN INT;
+END;
+$$
+ERROR 42000: FUNCTION F1 already exists
+#
+# Duplicate PROCEDURE in CREATE PACKAGE BODY
+#
+CREATE PACKAGE test2 AS
+PROCEDURE p1;
+END;
+$$
+CREATE PACKAGE BODY test2 AS
+PROCEDURE p1 AS BEGIN NULL; END;
+PROCEDURE p1 AS BEGIN NULL; END;
+END;
+$$
+ERROR 42000: PROCEDURE p1 already exists
+CREATE PACKAGE BODY test2 AS
+PROCEDURE p1 AS BEGIN NULL; END;
+PROCEDURE P1 AS BEGIN NULL; END;
+END;
+$$
+ERROR 42000: PROCEDURE P1 already exists
+DROP PACKAGE test2;
+#
+# Duplicate FUNCTION in CREATE PACKAGE BODY
+#
+CREATE PACKAGE test2 AS
+FUNCTION f1 RETURN INT;
+END;
+$$
+CREATE PACKAGE BODY test2 AS
+FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
+FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
+END;
+$$
+ERROR 42000: FUNCTION f1 already exists
+CREATE PACKAGE BODY test2 AS
+FUNCTION f1 RETURN INT AS BEGIN RETURN 0; END;
+FUNCTION F1 RETURN INT AS BEGIN RETURN 0; END;
+END;
+$$
+ERROR 42000: FUNCTION F1 already exists
 DROP PACKAGE test2;
 #
 # Routines declared in CREATE PACKAGE missing in CREATE PACKAGE BODY
@@ -743,7 +859,7 @@ a
 DROP PACKAGE test2;
 DROP TABLE t1;
 #
-# CREATA PACKAGE: Optional package name after the "END" keyword
+# CREATE PACKAGE: Optional package name after the "END" keyword
 #
 CREATE PACKAGE test2 AS
 FUNCTION f1 RETURN INT;
@@ -817,6 +933,39 @@ END p1;
 END test2;
 $$
 DROP PACKAGE test2;
+#
+# Package and package routine name and end name are case insensitive
+#
+CREATE PACKAGE test2 AS
+FUNCTION f1 RETURN TEXT;
+PROCEDURE p1;
+END TEST2;
+$$
+CREATE PACKAGE BODY test2 AS
+FUNCTION f1 RETURN TEXT AS
+BEGIN
+RETURN 'This is f1';
+END F1;
+PROCEDURE P1 AS
+BEGIN
+SELECT 'This is p1' AS msg;
+END p1;
+END TEST2;
+$$
+SELECT TEST2.F1();
+TEST2.F1()
+This is f1
+SELECT test2.f1();
+test2.f1()
+This is f1
+CALL TEST2.p1();
+msg
+This is p1
+CALL test2.P1();
+msg
+This is p1
+DROP PACKAGE BODY TEST2;
+DROP PACKAGE TEST2;
 #
 # Testing various qualified/non-qualified db/package SP call chains
 #

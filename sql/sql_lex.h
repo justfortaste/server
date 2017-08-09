@@ -3172,21 +3172,19 @@ public:
   sp_name *make_sp_name(THD *thd, const LEX_CSTRING *name);
   sp_name *make_sp_name(THD *thd, const LEX_CSTRING *name1,
                                   const LEX_CSTRING *name2);
-  sp_head *make_sp_head(THD *thd, sp_package *package,
-                        const sp_name *name,
-                        const Sp_handler *sph);
-  sp_head *make_sp_head_no_recursive(THD *thd, sp_package *package,
-                                     const sp_name *name,
+  sp_head *make_sp_head(THD *thd, const sp_name *name, const Sp_handler *sph);
+  sp_head *make_sp_head_no_recursive(THD *thd, const sp_name *name,
                                      const Sp_handler *sph);
   sp_head *make_sp_head_no_recursive(THD *thd,
-                                     sp_package *package,
                                      DDL_options_st options, sp_name *name,
                                      const Sp_handler *sph)
   {
     if (add_create_options_with_check(options))
       return NULL;
-    return make_sp_head_no_recursive(thd, package, name, sph);
+    return make_sp_head_no_recursive(thd, name, sph);
   }
+  bool sp_body_finalize_function(THD *);
+  bool sp_body_finalize_procedure(THD *);
   sp_package *create_package_start(THD *thd,
                                    enum_sql_command command,
                                    const Sp_handler *sph,

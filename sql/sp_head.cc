@@ -608,7 +608,8 @@ sp_package::sp_package(LEX *top_level_lex,
  :sp_head(NULL, sph),
   m_top_level_lex(top_level_lex),
   m_rcontext(NULL),
-  m_is_instantiated(false)
+  m_is_instantiated(false),
+  m_is_cloning_routine(false)
 {
   init_sp_name(&main_mem_root, name, name->m_explicit_name);
 }
@@ -670,7 +671,8 @@ bool sp_package::validate_after_parser(THD *thd)
     for (LEX *lex2; (lex2= it2++); )
     {
       DBUG_ASSERT(lex2->sphead);
-      if (!strcmp(lex2->sphead->m_name.str, lex->sphead->m_name.str) &&
+      if (Sp_handler::eq_routine_name(lex2->sphead->m_name,
+                                      lex->sphead->m_name) &&
           lex2->sphead->eq_routine_spec(lex->sphead))
       {
         found= true;
@@ -697,9 +699,15 @@ LEX *sp_package::LexList::find(const LEX_CSTRING &name,
     DBUG_ASSERT(lex->sphead);
     const char *dot;
     if (lex->sphead->m_handler->type() == type &&
-        (dot= strrchr(lex->sphead->m_name.str, '.')) &&
-        !strcmp(dot + 1, name.str))
-      return lex;
+        (dot= strrchr(lex->sphead->m_name.str, '.')))
+    {
+      size_t ofs= dot + 1 - lex->sphead->m_name.str;
+      LEX_CSTRING non_qualified_sphead_name= lex->sphead->m_name;
+      non_qualified_sphead_name.str+= ofs;
+      non_qualified_sphead_name.length-= ofs;
+      if (Sp_handler::eq_routine_name(non_qualified_sphead_name, name))
+        return lex;
+    }
   }
   return NULL;
 }
@@ -4970,14 +4978,21 @@ sp_head::add_set_for_loop_cursor_param_variables(THD *thd,
 */
 bool sp_head::check_package_routine_end_name(const LEX_CSTRING &end_name) const
 {
-  const char *errpos= strrchr(m_name.str, '.');
-  if (!errpos)
+  LEX_CSTRING non_qualified_name= m_name;
+  const char *errpos;
+  size_t ofs;
+  if (!end_name.length)
+    return false; // No end name
+  if (!(errpos= strrchr(m_name.str, '.')))
   {
     errpos= m_name.str;
     goto err;
   }
   errpos++;
-  if (!strcmp(end_name.str, errpos))
+  ofs= errpos - m_name.str;
+  non_qualified_name.str+= ofs;
+  non_qualified_name.length-= ofs;
+  if (Sp_handler::eq_routine_name(end_name, non_qualified_name))
     return false;
 err:
   my_error(ER_END_IDENTIFIER_DOES_NOT_MATCH, MYF(0), end_name.str, errpos);

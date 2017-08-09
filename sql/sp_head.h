@@ -899,6 +899,13 @@ public:
   public:
     LexList() { elements= 0; }
     LEX *find(const LEX_CSTRING &name, stored_procedure_type type);
+    bool check_dup(const LEX_CSTRING &name, const Sp_handler *sph)
+    {
+      if (!find(name, sph->type()))
+        return false;
+      my_error(ER_SP_ALREADY_EXISTS, MYF(0), sph->type_str(), name.str);
+      return true;
+    }
     void cleanup();
   };
   LexList m_routine_implementations;
@@ -906,6 +913,7 @@ public:
   struct LEX *m_top_level_lex;
   sp_rcontext *m_rcontext;
   bool m_is_instantiated;
+  bool m_is_cloning_routine;
   sp_package(LEX *top_level_lex,
              const sp_name *name,
              const Sp_handler *sph);

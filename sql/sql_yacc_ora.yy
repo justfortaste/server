@@ -1028,7 +1028,7 @@ bool my_yyoverflow(short **a, YYSTYPE **b, ulong *yystacksize);
         sp_opt_label BIN_NUM label_ident TEXT_STRING_filesystem ident_or_empty
         opt_constraint constraint opt_ident
         label_declaration_oracle labels_declaration_oracle
-        ident_directly_assignable
+        ident_directly_assignable opt_package_routine_end_name
         sp_decl_ident
         sp_block_label opt_place opt_db
 
@@ -1332,8 +1332,8 @@ bool my_yyoverflow(short **a, YYSTYPE **b, ulong *yystacksize);
         opt_serial_attribute opt_serial_attribute_list serial_attribute
         explainable_command
         set_assign
-        sf_tail_standalone sf_tail_package
-        sp_tail_standalone sp_tail_package
+        sf_tail_standalone
+        sp_tail_standalone
 END_OF_INPUT
 
 %type <NONE> call sp_proc_stmts sp_proc_stmts1 sp_proc_stmt
@@ -2197,31 +2197,73 @@ package_routine_lex:
         ;
 
 package_implementation_routine_definition:
-          FUNCTION_SYM remember_lex package_routine_lex
+          FUNCTION_SYM package_implementation_function   ';' { $$.init(); }
+        | PROCEDURE_SYM package_implementation_procedure ';' { $$.init(); }
+        ;
+
+package_implementation_function:
+          remember_lex package_routine_lex sp_name
           {
-            LEX *oldlex= $2;
-            thd->lex= $3;
-            if (oldlex->sphead->add_subroutine_implementation(thd, $3))
+            LEX *oldlex= $1;
+            $2->sql_command= SQLCOM_CREATE_FUNCTION;
+            if (oldlex->get_sp_package()->m_routine_implementations.
+                  check_dup($3->m_name, &sp_handler_package_function))
+              MYSQL_YYABORT;
+            if (oldlex->sphead->add_subroutine_implementation(thd, $2))
+              MYSQL_YYABORT;
+            thd->lex= $2;
+            if (!Lex->make_sp_head_no_recursive(thd, $3,
+                                                &sp_handler_package_function))
               MYSQL_YYABORT;
           }
-          sf_tail_package ';'
+          opt_sp_parenthesized_fdparam_list
+          sf_return_type
+          sp_c_chistics
           {
-            DBUG_ASSERT($2->sphead->get_package());
-            thd->lex= $2;
-            $$.init();
+            LEX *lex= thd->lex;
+            lex->sphead->set_chistics(lex->sp_chistics);
+            lex->sphead->set_body_start(thd, YYLIP->get_cpp_tok_start());
           }
-        | PROCEDURE_SYM remember_lex package_routine_lex
+          sp_tail_is
+          sp_body opt_package_routine_end_name
           {
-            LEX *oldlex= $2;
-            thd->lex= $3;
-            if (oldlex->sphead->add_subroutine_implementation(thd, $3))
+            if (Lex->sp_body_finalize_function(thd) ||
+                Lex->sphead->check_package_routine_end_name($11))
+              MYSQL_YYABORT;
+            DBUG_ASSERT($1->sphead->get_package());
+            thd->lex= $1;
+          }
+        ;
+
+package_implementation_procedure:
+          remember_lex package_routine_lex sp_name
+          {
+            LEX *oldlex= $1;
+            $2->sql_command= SQLCOM_CREATE_PROCEDURE;
+            if (oldlex->get_sp_package()->m_routine_implementations.
+                  check_dup($3->m_name, &sp_handler_package_procedure))
+              MYSQL_YYABORT;
+            if (oldlex->sphead->add_subroutine_implementation(thd, $2))
+              MYSQL_YYABORT;
+            thd->lex= $2;
+            if (!Lex->make_sp_head_no_recursive(thd, $3,
+                                                &sp_handler_package_procedure))
               MYSQL_YYABORT;
           }
-          sp_tail_package ';'
+          opt_sp_parenthesized_pdparam_list
+          sp_c_chistics
           {
-            DBUG_ASSERT($2->sphead->get_package());
-            thd->lex= $2;
-            $$.init();
+            Lex->sphead->set_chistics(Lex->sp_chistics);
+            Lex->sphead->set_body_start(thd, YYLIP->get_cpp_tok_start());
+          }
+          sp_tail_is
+          sp_body opt_package_routine_end_name
+          {
+            if (Lex->sp_body_finalize_procedure(thd) ||
+                Lex->sphead->check_package_routine_end_name($10))
+              MYSQL_YYABORT;
+            DBUG_ASSERT($1->sphead->get_package());
+            thd->lex= $1;
           }
         ;
 
@@ -2264,16 +2306,17 @@ package_specification_function:
           remember_lex package_routine_lex sp_name
           {
             LEX *oldlex= $1;
-            thd->lex= $2;
+            $2->sql_command= SQLCOM_CREATE_FUNCTION;
+            if (oldlex->get_sp_package()->m_routine_declarations.
+                  check_dup($3->m_name, &sp_handler_package_function))
+              MYSQL_YYABORT;
             if (oldlex->sphead->add_subroutine_declaration(thd, $2))
               MYSQL_YYABORT;
-            if (!Lex->make_sp_head_no_recursive(thd,
-                                                oldlex->get_sp_package(),
-                                                DDL_options(), $3,
-                                                &sp_handler_function))
+            thd->lex= $2;
+            if (!$2->make_sp_head_no_recursive(thd, $3,
+                                                &sp_handler_package_function))
               MYSQL_YYABORT;
             (void) is_native_function_with_warn(thd, &$3->m_name);
-            Lex->sql_command= SQLCOM_CREATE_FUNCTION;
           }
           opt_sp_parenthesized_fdparam_list
           sf_return_type
@@ -2292,15 +2335,16 @@ package_specification_procedure:
           remember_lex package_routine_lex sp_name
           {
             LEX *oldlex= $1;
-            thd->lex= $2;
+            $2->sql_command= SQLCOM_CREATE_PROCEDURE;
+            if (oldlex->get_sp_package()->m_routine_declarations.
+                  check_dup($3->m_name, &sp_handler_package_procedure))
+              MYSQL_YYABORT;
             if (oldlex->sphead->add_subroutine_declaration(thd, $2))
               MYSQL_YYABORT;
-            if (!Lex->make_sp_head_no_recursive(thd,
-                                                oldlex->get_sp_package(),
-                                                DDL_options(), $3,
-                                                &sp_handler_procedure))
+            thd->lex= $2;
+            if (!$2->make_sp_head_no_recursive(thd, $3,
+                                               &sp_handler_package_procedure))
               MYSQL_YYABORT;
-            Lex->sql_command= SQLCOM_CREATE_PROCEDURE;
           }
           opt_sp_parenthesized_pdparam_list
           sp_c_chistics
@@ -2609,9 +2653,8 @@ ev_sql_stmt:
             if (lex->sphead)
               my_yyabort_error((ER_EVENT_RECURSION_FORBIDDEN, MYF(0)));
               
-            if (!lex->make_sp_head(thd, NULL,
-                                   lex->event_parse_data->identifier,
-                                   &sp_handler_procedure))
+            if (!lex->make_sp_head(thd, lex->event_parse_data->identifier,
+                                        &sp_handler_procedure))
               MYSQL_YYABORT;
 
             lex->sphead->set_body_start(thd, lip->get_cpp_ptr());
@@ -17090,7 +17133,7 @@ trigger_tail:
             (*static_cast<st_trg_execution_order*>(&lex->trg_chistics))= ($17);
             lex->trg_chistics.ordering_clause_end= lip->get_cpp_ptr();
 
-            if (!lex->make_sp_head(thd, NULL, $4, &sp_handler_trigger))
+            if (!lex->make_sp_head(thd, $4, &sp_handler_trigger))
               MYSQL_YYABORT;
 
             lex->sphead->set_body_start(thd, lip->get_cpp_tok_start());
@@ -17165,8 +17208,7 @@ sf_tail:
           opt_if_not_exists
           sp_name
           {
-            if (!Lex->make_sp_head_no_recursive(thd, Lex->get_sp_package(),
-                                                $1, $2,
+            if (!Lex->make_sp_head_no_recursive(thd, $1, $2,
                                                 &sp_handler_function))
               MYSQL_YYABORT;
           }
@@ -17183,29 +17225,15 @@ sf_tail:
           sp_tail_is
           sp_body
           {
-            LEX *lex= thd->lex;
-            sp_head *sp= lex->sphead;
-            if (sp->check_unresolved_goto())
+            if (Lex->sp_body_finalize_function(thd))
               MYSQL_YYABORT;
-
-            if (sp->is_not_allowed_in_function("function"))
-              MYSQL_YYABORT;
-
-            lex->sql_command= SQLCOM_CREATE_SPFUNCTION;
-            sp->set_stmt_end(thd);
-            if (!(sp->m_flags & sp_head::HAS_RETURN))
-              my_yyabort_error((ER_SP_NORETURN, MYF(0),
-                                ErrConvDQName(sp).ptr()));
-            (void) is_native_function_with_warn(thd, &sp->m_name);
-            sp->restore_thd_mem_root(thd);
           }
         ;
 
 sp_tail:
           opt_if_not_exists sp_name
           {
-            if (!Lex->make_sp_head_no_recursive(thd, Lex->get_sp_package(),
-                                                $1, $2,
+            if (!Lex->make_sp_head_no_recursive(thd, $1, $2,
                                                 &sp_handler_procedure))
               MYSQL_YYABORT;
           }
@@ -17218,13 +17246,8 @@ sp_tail:
           sp_tail_is
           sp_body
           {
-            LEX *lex= Lex;
-            sp_head *sp= lex->sphead;
-            if (sp->check_unresolved_goto())
+            if (Lex->sp_body_finalize_procedure(thd))
               MYSQL_YYABORT;
-            sp->set_stmt_end(thd);
-            lex->sql_command= SQLCOM_CREATE_PROCEDURE;
-            sp->restore_thd_mem_root(thd);
           }
         ;
 
@@ -17248,22 +17271,9 @@ sp_tail_standalone:
           }
         ;
 
-sf_tail_package:
-          sf_tail
-        | sf_tail ident
-          {
-            if (Lex->sphead->check_package_routine_end_name($2))
-              MYSQL_YYABORT;
-          }
-        ;
-
-sp_tail_package:
-          sp_tail
-        | sp_tail ident
-          {
-            if (Lex->sphead->check_package_routine_end_name($2))
-              MYSQL_YYABORT;
-          }
+opt_package_routine_end_name:
+          /* Empty */ { $$= null_clex_str; }
+        | ident       { $$= $1; }
         ;
 
 sp_tail_is:
